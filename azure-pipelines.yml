@@ -1,0 +1,99 @@
+# Node.js with Angular
+# Build a Node.js project that uses Angular.
+# Add steps that analyze code, save build artifacts, deploy, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/javascript
+
+trigger:
+- master
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+- stage: Build
+  displayName: Build stage
+  jobs:
+  - job: Build
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - task: NodeTool@0
+        inputs:
+          versionSpec: '16.x'
+        displayName: 'Install Node.js 16.x'
+
+      - script: |
+          cd AngularWithAzure/
+          npm install -g @angular/cli
+          npm install
+          ng build --prod
+        displayName: 'npm install and build'
+        workingDirectory: '$(Build.SourcesDirectory)'
+
+      - task: CmdLine@2
+        displayName: "Run unit tests"
+        inputs:
+          script: |
+            cd AngularWithAzure/
+            ng test --browsers=ChromeHeadless --code-coverage --watch=false
+
+      - task: ArchiveFiles@2
+        displayName: 'Archive files'
+        inputs:
+          rootFolderOrFile: '$(System.DefaultWorkingDirectory)/dist/angular-with-azure/'
+          includeRootFolder: false
+          archiveType: zip
+          archiveFile: $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip
+          replaceExistingArchive: true
+
+      - task: PublishBuildArtifacts@1
+        inputs:
+          PathtoPublish: '$(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip'
+          ArtifactName: 'drop'
+          publishLocation: 'Container'
+
+- stage: Development
+  displayName: 'Deploy to Development'
+  dependsOn: Build
+  condition: succeeded()
+  jobs:
+  - deployment: DeploymentDevelopment
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: Development
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+
+          - task: AzureWebApp@1
+            displayName: 'Deploy App Service'
+            inputs:
+              azureSubscription: 'Inform-your-subscription'
+              appType: 'webAppLinux'
+              appName: 'angularwithazure'
+              package: '$(Pipeline.Workspace)/drop/$(Build.BuildId).zip'
+              runtimeStack: 'NODE|16-lts'
+
+- stage: Acceptance
+  dependsOn: [ Development ]
+  displayName: 'Deploy to Acceptance'
+  jobs:
+    - job:  DeployToAcceptance
+      displayName: 'DeployAcceptance'
+      steps:
+      - script: echo Deploying to Acceptance
+- stage: Production
+  dependsOn: [ Acceptance ]
+  displayName: 'Deploy to Production'
+  jobs:
+    - deployment: DeployProduction
+      pool:
+        vmImage: 'ubuntu-latest'
+      environment: Production
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - script: echo Deploying to Production
+     
